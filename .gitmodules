@@ -1,0 +1,3 @@
+[submodule "lib/Waveshare_ePaper"]
+	path = lib/Waveshare_ePaper
+	url = https://github.com/waveshareteam/e-Paper.git
