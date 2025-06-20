@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "*.ejs": "html",
+        "*.json.liquid": "json",
+        "*.yaml.liquid": "yaml",
+        "*.md.liquid": "markdown",
+        "*.js.liquid": "liquid-javascript",
+        "*.css.liquid": "liquid-css",
+        "*.scss.liquid": "liquid-scss",
+        "new": "cpp"
+    },
+    "C_Cpp.errorSquiggles": "disabled"
+}
