@@ -62,8 +62,20 @@ void loop() {
     float norm = (reading - minBrakeForce) / (maxBrakeForce - minBrakeForce);
     norm = constrain(1.0 - norm, 0.0, 1.0); // inverted brake curve
 
+    float output;
+    if (norm <= 0.15)
+      output = norm;
+    else {
+        float adjustedNorm = (norm - 0.15) / 0.85;
+        float curvedPart = 1 - pow(1 - adjustedNorm, 0.4);
+        output = 0.15 + 0.85 * curvedPart;
+    }
+
+    Serial.print("norm: ");
+    Serial.println(output);
+
     // Map to DAC output voltage (e.g., 3.0V → 0.7V)
-    int dacValue = (int)(minVoltage + norm * (maxVoltage - minVoltage));
+    int dacValue = (int)(minVoltage + output * (maxVoltage - minVoltage));
     dac.setVoltage(dacValue, false);
   }
 }
