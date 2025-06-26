@@ -11,6 +11,7 @@ const int HX711_sck = 2; //mcu > HX711 sck pin
 HX711_ADC LoadCell(HX711_dout, HX711_sck);
 
 const int calVal_eepromAdress = 0;
+const int MAX_LOADCELL_RETRY = 25;
 unsigned long t = 0;
 
 #include <Wire.h>
@@ -38,18 +39,27 @@ void setup()
 #endif
   EEPROM.get(calVal_eepromAdress, calibrationValue); // uncomment this if you want to fetch the calibration value from eeprom
 
-  unsigned long stabilizingtime = 5000; // preciscion right after power-up can be improved by adding a few seconds of stabilizing time
+  unsigned long stabilizingtime = 2500; // preciscion right after power-up can be improved by adding a few seconds of stabilizing time
   boolean _tare = true; //set this to false if you don't want tare to be performed in the next step
   // LoadCell.conversionTime = 80.;
   LoadCell.start(stabilizingtime, _tare);
   if (LoadCell.getTareTimeoutFlag()) {
+    int retries = 0;
     Serial.println("Timeout, check MCU>HX711 wiring and pin designations");
-    while (1);
+    delay(250);
+    while (retries < MAX_LOADCELL_RETRY) {
+      if (LoadCell.getTareTimeoutFlag()) {
+        Serial.println("Timeout, check MCU>HX711 wiring and pin designations");
+        retries++;
+        delay(250);
+      }
+      else {
+        retries = MAX_LOADCELL_RETRY;
+      }
+    }
   }
-  else {
-    LoadCell.setCalFactor(calibrationValue); // set calibration value (float)
-    Serial.println("Startup is complete");
-  }
+  LoadCell.setCalFactor(calibrationValue); // set calibration value (float)
+  Serial.println("Startup is complete");
 }
 
 void loop() {
@@ -58,9 +68,11 @@ void loop() {
     float reading = LoadCell.getData(); // non-blocking access to filtered data
 
     // Scale + invert brake force
+    // Serial.println(reading);
     reading = constrain(reading, minBrakeForce, maxBrakeForce);
     float norm = (reading - minBrakeForce) / (maxBrakeForce - minBrakeForce);
     norm = constrain(1.0 - norm, 0.0, 1.0); // inverted brake curve
+
 
     // Map to DAC output voltage (e.g., 3.0V → 0.7V)
     int dacValue = (int)(minVoltage + norm * (maxVoltage - minVoltage));
