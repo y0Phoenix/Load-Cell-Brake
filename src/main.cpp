@@ -1,48 +1,62 @@
+/*
+
+This is made for the G920. The top const variable are configurations for this code but further configuration for the 
+HX711 library will need to be done in the libraries folder in the dependencies directory
+
+*/
+
 #include <HX711_ADC.h>
 #if defined(ESP8266)|| defined(ESP32) || defined(AVR)
 #include <EEPROM.h>
 #endif
 
-//pins:
+//pins for the HX711 borar:
 const int HX711_dout = 3; //mcu > HX711 dout pin
 const int HX711_sck = 2; //mcu > HX711 sck pin
-
 //HX711 constructor:
 HX711_ADC LoadCell(HX711_dout, HX711_sck);
 
 const int calVal_eepromAdress = 0;
-const int MAX_LOADCELL_RETRY = 25;
-unsigned long t = 0;
+const int MAX_LOADCELL_RETRY = 25; // how many retries for the initial tare before continuing without
 
 #include <Wire.h>
 #include <Adafruit_MCP4725.h>
 #include <Arduino.h>
 
 Adafruit_MCP4725 dac;
-float maxBrakeForce = 9500.0;
-float minBrakeForce = 1000.0;
-int minVoltage = 1000;
-int maxVoltage = 2650;
+// maximum braking force to determine 100% brake the amount is in grams
+const float MAX_BRAKE_FORCE = 9500.0;
+// minimum braking force to determine 0% brake the amount is in grams
+const float MIN_BRAKE_FORCE = 750.0;
+// min voltage rating to the MCP4725 DAC board this is the minimun voltage the G920 is expecting
+const int MIN_VOLTAGE = 1150;
+// max voltage rating to the MCP4725 DAC board this is the maximum voltage the G920 is expecting
+const int MAX_VOLTAGE = 2300;
+// the initial percentage of braking which should be linear
+const float LINEAR_BRAKING_FORCE = 0.15;
+const float OPOSE = 1. - LINEAR_BRAKING_FORCE;
+// the severity of the piecewise curve the higher the number the sharper the curve
+const float POW_BRAKING_CURVE = 0.2;
 
 void setup()
 {
-  Serial.begin(9600); delay(10);
+  Serial.begin(9600); delay(10); // start the serial connection at 9600 baudrate
   dac.begin(0x60); // Default I2C address for MCP4725
   Serial.println("\nStarting...\n");
 
   LoadCell.begin();
-  //LoadCell.setReverseOutput(); //uncomment to turn a negative output value to positive
   float calibrationValue; // calibration value (see example file "Calibration.ino")
   calibrationValue = 696.0; // uncomment this if you want to set the calibration value in the sketch
-#if defined(ESP8266)|| defined(ESP32)
-  //EEPROM.begin(512); // uncomment this if you use ESP8266/ESP32 and want to fetch the calibration value from eeprom
-#endif
-  EEPROM.get(calVal_eepromAdress, calibrationValue); // uncomment this if you want to fetch the calibration value from eeprom
+  #if defined(ESP8266)|| defined(ESP32)
+    //EEPROM.begin(512); // uncomment this if you use ESP8266/ESP32 and want to fetch the calibration value from eeprom
+  #endif
+    EEPROM.get(calVal_eepromAdress, calibrationValue); // uncomment this if you want to fetch the calibration value from eeprom
 
   unsigned long stabilizingtime = 2500; // preciscion right after power-up can be improved by adding a few seconds of stabilizing time
   boolean _tare = true; //set this to false if you don't want tare to be performed in the next step
-  // LoadCell.conversionTime = 80.;
-  LoadCell.start(stabilizingtime, _tare);
+  LoadCell.start(stabilizingtime, _tare); // start the loadcell functionality
+
+  // this will timeout with a lower sample amount in the configuration.h file for some reason
   if (LoadCell.getTareTimeoutFlag()) {
     int retries = 0;
     Serial.println("Timeout, check MCU>HX711 wiring and pin designations");
@@ -67,94 +81,43 @@ void loop() {
   if (LoadCell.update()) {
     float reading = LoadCell.getData(); // non-blocking access to filtered data
 
-    // Scale + invert brake force
-    // Serial.println(reading);
-    reading = constrain(reading, minBrakeForce, maxBrakeForce);
-    float norm = (reading - minBrakeForce) / (maxBrakeForce - minBrakeForce);
-    norm = constrain(1.0 - norm, 0.0, 1.0); // inverted brake curve
+    reading = constrain(reading, MIN_BRAKE_FORCE, MAX_BRAKE_FORCE);
+    float norm = (reading - MIN_BRAKE_FORCE) / (MAX_BRAKE_FORCE - MIN_BRAKE_FORCE);
+    norm = constrain(norm, 0.0, 1.0); // constrained brake norm in percentage
 
+    // float output = norm;
+    // for making the braking input more realistic. instead of linearly converting force to brake percent it converts on a curve after a specified amount of linear force 
     float output;
-    if (norm <= 0.15)
+    if (norm <= LINEAR_BRAKING_FORCE)
       output = norm;
     else {
-        float adjustedNorm = (norm - 0.15) / 0.85;
-        float curvedPart = 1 - pow(1 - adjustedNorm, 0.4);
-        output = 0.15 + 0.85 * curvedPart;
+        float adjustedNorm = (norm - LINEAR_BRAKING_FORCE) / OPOSE;
+        float curvedPart = 1 - pow(1 - adjustedNorm, POW_BRAKING_CURVE);
+        output = LINEAR_BRAKING_FORCE + OPOSE * curvedPart;
     }
 
-    Serial.print("norm: ");
-    Serial.println(output);
-
+    
     // Map to DAC output voltage (e.g., 3.0V → 0.7V)
-    int dacValue = (int)(minVoltage + output * (maxVoltage - minVoltage));
+    int dacValue = (int)(MIN_VOLTAGE + (1 - output) * (MAX_VOLTAGE - MIN_VOLTAGE));
     dac.setVoltage(dacValue, false);
+
+    // Serial.print("old norm: ");
+    // Serial.print(norm);
+    // Serial.print("\tnew norm: ");
+    // Serial.print(1 - output);
+    // Serial.print("\tvoltage: ");
+    // Serial.println(dacValue);
+
   }
 }
 
+/*
 
-// void loop() {
-//   static boolean newDataReady = 0;
-//   const int serialPrintInterval = 0; // change to >0 to debug
+CALIBRATION CODE
 
-//   // check for new data
-//   if (LoadCell.update()) {
-//     newDataReady = true;
-//   }
+use this to calibrate the load cell to a known weight then switch to the other normal running code
+*/
 
-//   if (newDataReady) {
-//     newDataReady = false;
-
-//     float reading = LoadCell.getData();
-
-//     // Constrain and normalize
-//     reading = constrain(reading, minBrakeForce, maxBrakeForce);
-//     float norm = (reading - minBrakeForce) / (maxBrakeForce - minBrakeForce);
-//     norm = constrain(norm, 0.0, 1.0);
-//     norm = 1.0 - norm; // invert
-
-//     int dacValue = (int)(minVoltage + norm * (maxVoltage - minVoltage));
-//     dac.setVoltage(dacValue, false);
-
-//     if (millis() > t + serialPrintInterval) {
-//       t = millis();
-//       Serial.print("Reading: "); Serial.print(reading);
-//       Serial.print(" | DAC: "); Serial.println(dacValue);
-//     }
-//   }
-// }
-
-// void loop() {
-//   static boolean newDataReady = 0;
-//   const int serialPrintInterval = 0; //increase value to slow down serial print activity
-
-//   // check for new data/start next conversion:
-//   if (LoadCell.update()) newDataReady = true;
-
-//   // get smoothed value from the dataset:
-//   if (newDataReady) {
-//     if (millis() > t + serialPrintInterval) {
-//       float i = LoadCell.getData();
-//       Serial.print("Load_cell output val: ");
-//       Serial.println(i);
-//       newDataReady = 0;
-//       t = millis();
-//     }
-//   }
-
-//   // receive command from serial terminal, send 't' to initiate tare operation:
-//   if (Serial.available() > 0) {
-//     char inByte = Serial.read();
-//     if (inByte == 't') LoadCell.tareNoDelay();
-//   }
-
-//   // check if last tare operation is complete:
-//   if (LoadCell.getTareStatus() == true) {
-//     Serial.println("Tare complete");
-//   }
-
-// }
-
-// CALIBRATE CODE
 
 // #include <HX711_ADC.h>
 // #if defined(ESP8266)|| defined(ESP32) || defined(AVR)
